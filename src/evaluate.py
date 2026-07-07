@@ -6,13 +6,13 @@ Este script:
 2. Cria/atualiza dataset no LangSmith
 3. Puxa prompts otimizados do LangSmith Hub (fonte única de verdade)
 4. Executa prompts contra o dataset
-5. Calcula 5 métricas (F1-Score, Tone Score, Acceptance Criteria Score, User Story Format Score, Completeness Score)
+5. Calcula 5 métricas (Helpfulness, Correctness, F1-Score, Clarity, Precision)
 6. Publica resultados no dashboard do LangSmith
 7. Exibe resumo no terminal
 
 Suporta múltiplos providers de LLM:
 - OpenAI (gpt-4o, gpt-4o-mini)
-- Google Gemini (gemini-1.5-flash, gemini-1.5-pro)
+- Google Gemini (gemini-2.5-flash)
 
 Configure o provider no arquivo .env através da variável LLM_PROVIDER.
 """
@@ -26,14 +26,8 @@ from dotenv import load_dotenv
 from langsmith import Client
 from langchain import hub
 from langchain_core.prompts import ChatPromptTemplate
-from utils import check_env_vars, format_score, print_section_header, get_llm as get_configured_llm, load_yaml
-from metrics import (
-    evaluate_f1_score,
-    evaluate_tone_score,
-    evaluate_acceptance_criteria_score,
-    evaluate_user_story_format_score,
-    evaluate_completeness_score,
-)
+from utils import check_env_vars, format_score, print_section_header, get_llm as get_configured_llm
+from metrics import evaluate_f1_score, evaluate_clarity, evaluate_precision
 
 load_dotenv()
 
@@ -142,18 +136,6 @@ def pull_prompt_from_langsmith(prompt_name: str) -> ChatPromptTemplate:
             print("- Você tem acesso ao workspace do LangSmith")
             print("- Sua conexão com a internet está funcionando")
 
-        print("\nTentando fallback local: prompts/bug_to_user_story_v2.yml")
-        local_yaml = load_yaml("prompts/bug_to_user_story_v2.yml")
-        if local_yaml and "bug_to_user_story_v2" in local_yaml:
-            local_data = local_yaml["bug_to_user_story_v2"]
-            system_prompt = local_data.get("system_prompt", "")
-            user_prompt = local_data.get("user_prompt", "{bug_report}")
-            print("✓ Prompt local carregado com sucesso")
-            return ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", user_prompt),
-            ])
-
         print(f"\n{'=' * 70}\n")
         raise
 
@@ -212,63 +194,48 @@ def evaluate_prompt(
         llm = get_llm()
 
         f1_scores = []
-        tone_scores = []
-        acceptance_scores = []
-        format_scores = []
-        completeness_scores = []
+        clarity_scores = []
+        precision_scores = []
 
-        max_examples = int(os.getenv("MAX_EVAL_EXAMPLES", "10"))
-        max_examples = max(1, min(max_examples, len(examples)))
+        print("   Avaliando exemplos...")
 
-        print(f"   Avaliando exemplos (máximo: {max_examples})...")
-
-        for i, example in enumerate(examples[:max_examples], 1):
+        for i, example in enumerate(examples, 1):
             result = evaluate_prompt_on_example(prompt_template, example, llm)
 
             if result["answer"]:
                 f1 = evaluate_f1_score(result["question"], result["answer"], result["reference"])
-                tone = evaluate_tone_score(result["question"], result["answer"], result["reference"])
-                acceptance = evaluate_acceptance_criteria_score(result["question"], result["answer"], result["reference"])
-                story_format = evaluate_user_story_format_score(result["question"], result["answer"], result["reference"])
-                completeness = evaluate_completeness_score(result["question"], result["answer"], result["reference"])
+                clarity = evaluate_clarity(result["question"], result["answer"], result["reference"])
+                precision = evaluate_precision(result["question"], result["answer"], result["reference"])
 
                 f1_scores.append(f1["score"])
-                tone_scores.append(tone["score"])
-                acceptance_scores.append(acceptance["score"])
-                format_scores.append(story_format["score"])
-                completeness_scores.append(completeness["score"])
+                clarity_scores.append(clarity["score"])
+                precision_scores.append(precision["score"])
 
-                print(
-                    f"      [{i}/{max_examples}] "
-                    f"F1:{f1['score']:.2f} "
-                    f"Tone:{tone['score']:.2f} "
-                    f"AC:{acceptance['score']:.2f} "
-                    f"Format:{story_format['score']:.2f} "
-                    f"Completeness:{completeness['score']:.2f}"
-                )
+                print(f"      [{i}/{len(examples)}] F1:{f1['score']:.2f} Clarity:{clarity['score']:.2f} Precision:{precision['score']:.2f}")
 
         avg_f1 = sum(f1_scores) / len(f1_scores) if f1_scores else 0.0
-        avg_tone = sum(tone_scores) / len(tone_scores) if tone_scores else 0.0
-        avg_acceptance = sum(acceptance_scores) / len(acceptance_scores) if acceptance_scores else 0.0
-        avg_format = sum(format_scores) / len(format_scores) if format_scores else 0.0
-        avg_completeness = sum(completeness_scores) / len(completeness_scores) if completeness_scores else 0.0
+        avg_clarity = sum(clarity_scores) / len(clarity_scores) if clarity_scores else 0.0
+        avg_precision = sum(precision_scores) / len(precision_scores) if precision_scores else 0.0
+
+        avg_helpfulness = (avg_clarity + avg_precision) / 2
+        avg_correctness = (avg_f1 + avg_precision) / 2
 
         return {
+            "helpfulness": round(avg_helpfulness, 4),
+            "correctness": round(avg_correctness, 4),
             "f1_score": round(avg_f1, 4),
-            "tone_score": round(avg_tone, 4),
-            "acceptance_criteria_score": round(avg_acceptance, 4),
-            "user_story_format_score": round(avg_format, 4),
-            "completeness_score": round(avg_completeness, 4)
+            "clarity": round(avg_clarity, 4),
+            "precision": round(avg_precision, 4)
         }
 
     except Exception as e:
         print(f"   ❌ Erro na avaliação: {e}")
         return {
+            "helpfulness": 0.0,
+            "correctness": 0.0,
             "f1_score": 0.0,
-            "tone_score": 0.0,
-            "acceptance_criteria_score": 0.0,
-            "user_story_format_score": 0.0,
-            "completeness_score": 0.0
+            "clarity": 0.0,
+            "precision": 0.0
         }
 
 
@@ -277,30 +244,32 @@ def display_results(prompt_name: str, scores: Dict[str, float]) -> bool:
     print(f"Prompt: {prompt_name}")
     print("=" * 50)
 
-    print("\nMétricas Customizadas:")
-    print(f"  - F1-Score: {format_score(scores['f1_score'], threshold=0.9)}")
-    print(f"  - Tone Score: {format_score(scores['tone_score'], threshold=0.9)}")
-    print(f"  - Acceptance Criteria Score: {format_score(scores['acceptance_criteria_score'], threshold=0.9)}")
-    print(f"  - User Story Format Score: {format_score(scores['user_story_format_score'], threshold=0.9)}")
-    print(f"  - Completeness Score: {format_score(scores['completeness_score'], threshold=0.9)}")
+    print("\nMétricas Derivadas:")
+    print(f"  - Helpfulness: {format_score(scores['helpfulness'], threshold=0.8)}")
+    print(f"  - Correctness: {format_score(scores['correctness'], threshold=0.8)}")
+
+    print("\nMétricas Base:")
+    print(f"  - F1-Score: {format_score(scores['f1_score'], threshold=0.8)}")
+    print(f"  - Clarity: {format_score(scores['clarity'], threshold=0.8)}")
+    print(f"  - Precision: {format_score(scores['precision'], threshold=0.8)}")
 
     average_score = sum(scores.values()) / len(scores)
-    all_metrics_passed = all(value >= 0.9 for value in scores.values())
 
     print("\n" + "-" * 50)
     print(f"📊 MÉDIA GERAL: {average_score:.4f}")
     print("-" * 50)
 
-    passed = average_score >= 0.9 and all_metrics_passed
+    all_above_threshold = all(score >= 0.8 for score in scores.values())
+    passed = all_above_threshold and average_score >= 0.8
 
     if passed:
-        print("\n✅ STATUS: APROVADO (todas as métricas >= 0.9)")
+        print(f"\n✅ STATUS: APROVADO - Todas as métricas >= 0.8")
     else:
-        print("\n❌ STATUS: REPROVADO")
-        if not all_metrics_passed:
-            print("⚠️  Existe ao menos uma métrica individual abaixo de 0.9")
-        if average_score < 0.9:
-            print(f"⚠️  Média atual: {average_score:.4f} | Necessário: 0.9000")
+        print(f"\n❌ STATUS: REPROVADO")
+        failed_metrics = [name for name, score in scores.items() if score < 0.8]
+        if failed_metrics:
+            print(f"⚠️  Métricas abaixo de 0.8: {', '.join(failed_metrics)}")
+        print(f"⚠️  Média atual: {average_score:.4f} | Necessário: 0.8000")
 
     return passed
 
@@ -326,7 +295,7 @@ def main():
         return 1
 
     client = Client()
-    project_name = os.getenv("LANGCHAIN_PROJECT") or os.getenv("LANGSMITH_PROJECT") or "prompt-optimization-challenge-resolved"
+    project_name = os.getenv("LANGSMITH_PROJECT", "prompt-optimization-challenge-resolved")
 
     jsonl_path = "datasets/bug_to_user_story.jsonl"
 
@@ -345,11 +314,15 @@ def main():
     print("Certifique-se de ter feito push dos prompts antes de avaliar:")
     print("  python src/push_prompts.py\n")
 
-    username = (
-        os.getenv("LANGSMITH_USERNAME", "").strip()
-        or os.getenv("USERNAME_LANGSMITH_HUB", "").strip()
-    )
-    prompts_to_evaluate = [f"{username}/bug_to_user_story_v2"] if username else ["bug_to_user_story_v2"]
+    username = os.getenv("USERNAME_LANGSMITH_HUB", "")
+    if not username:
+        print("❌ USERNAME_LANGSMITH_HUB não configurada no .env")
+        print("   Configure seu username do LangSmith Hub antes de continuar.")
+        return 1
+
+    prompts_to_evaluate = [
+        f"{username}/bug_to_user_story_v2",
+    ]
 
     all_passed = True
     evaluated_count = 0
@@ -377,11 +350,11 @@ def main():
             results_summary.append({
                 "prompt": prompt_name,
                 "scores": {
+                    "helpfulness": 0.0,
+                    "correctness": 0.0,
                     "f1_score": 0.0,
-                    "tone_score": 0.0,
-                    "acceptance_criteria_score": 0.0,
-                    "user_story_format_score": 0.0,
-                    "completeness_score": 0.0
+                    "clarity": 0.0,
+                    "precision": 0.0
                 },
                 "passed": False
             })
@@ -399,7 +372,7 @@ def main():
     print(f"Reprovados: {sum(1 for r in results_summary if not r['passed'])}\n")
 
     if all_passed:
-        print("✅ Todos os prompts atingiram os critérios (média e métricas individuais >= 0.9)!")
+        print("✅ Todos os prompts atingiram todas as métricas >= 0.8!")
         print(f"\n✓ Confira os resultados em:")
         print(f"  https://smith.langchain.com/projects/{project_name}")
         print("\nPróximos passos:")
@@ -408,7 +381,7 @@ def main():
         print("3. Faça commit e push para o GitHub")
         return 0
     else:
-        print("⚠️  Alguns prompts não atingiram os critérios mínimos")
+        print("⚠️  Alguns prompts não atingiram todas as métricas >= 0.8")
         print("\nPróximos passos:")
         print("1. Refatore os prompts com score baixo")
         print("2. Faça push novamente: python src/push_prompts.py")

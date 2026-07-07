@@ -86,7 +86,7 @@
                 Acessar o script src/pull_prompts.py que:
                 Conecta ao LangSmith usando suas credenciais
                 Faz pull do seguinte prompts:
-                    leonanluppi/bug_to_user_story_v1
+                    edimilsonldutra/bug_to_user_story_v1
                 Salva os prompts localmente em prompts//bug_to_user_story_v1.yml
         2. Otimização do Prompt
             Agora que você tem o prompt inicial, é hora de refatorá-lo usando as técnicas de prompt aprendidas no curso.
