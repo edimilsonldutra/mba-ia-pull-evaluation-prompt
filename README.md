@@ -410,7 +410,7 @@ Como um [usuário], eu quero [ação], para que [benefício].
 ## Resultados Finais
 
 - **Prompt avaliado:** `edimilsonldutra/bug_to_user_story_v2`
-- **Dashboard LangSmith (público):** [LINK PÚBLICO](https://smith.langchain.com/o/9373adeb-2264-45d8-8b68-6dafc9ede339/dashboards/projects/ecbc3f73-5313-4be6-8c7c-b8c64f95e510)
+- **Dashboard LangSmith (público):** [LINK PÚBLICO](https://smith.langchain.com/o/8e977920-5b94-481a-972a-f9844f9a8372/projects/prompt-optimization-challenge-resolved)
 - **Status final:** ✅ Aprovado — todas as métricas >= 0.8
 - **Média geral:** 0.8712
 
